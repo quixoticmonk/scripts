@@ -11,7 +11,7 @@ if [ "$#" -gt 0 ] && [ "$1" == "--help" ]; then
     echo ""
     echo "This script sets up a GitHub OIDC provider in AWS and creates a role"
     echo "called 'git-provisioning-agent-role' that can be assumed by the"
-    echo "'quixoticmonk/terraform-aws-glue' GitHub repository."
+    echo "GitHub repository you specify."
     echo ""
     echo "Required files:"
     echo "  - policya.json: IAM policy to attach to the role"
@@ -25,7 +25,8 @@ if [ "$#" -gt 0 ] && [ "$1" == "--help" ]; then
     echo "  - AWS Account ID"
     echo "  - Product ID"
     echo "  - Product Name"
-    echo "  - AWS Region"
+    echo "  - AWS Region (defaults to us-east-1)"
+    echo "  - GitHub Repository"
     echo ""
     echo "Make sure you have the AWS CLI installed and configured with appropriate credentials."
     exit 0
@@ -37,7 +38,11 @@ set -e
 read -p "Enter AWS Account ID: " ACCOUNT_ID
 read -p "Enter Product ID: " PRODUCT_ID
 read -p "Enter Product Name: " PRODUCT_NAME
-read -p "Enter AWS Region: " REGION
+read -p "Enter GitHub Repository (e.g., username/repo): " GITHUB_REPO
+
+# Set default region if not provided
+REGION=${REGION:-"us-east-1"}
+echo "Using AWS Region: $REGION"
 
 # Function to replace placeholders in JSON files
 replace_placeholders() {
@@ -94,7 +99,7 @@ cat > trust-policy.json << EOF
           "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
         },
         "StringLike": {
-          "token.actions.githubusercontent.com:sub": "repo:quixoticmonk/terraform-aws-glue:*"
+          "token.actions.githubusercontent.com:sub": "repo:$GITHUB_REPO:*"
         }
       }
     }
@@ -107,9 +112,12 @@ echo "Creating role git-provisioning-agent-role..."
 # Check if perm1.json exists to use as permissions boundary
 if [ -f "perm1.json" ]; then
     echo "Using perm1.json as permissions boundary for the role..."
+    # Use the filename without extension as the policy name
+    local perm1_name=$(basename "perm1.json" .json)
     PERM_BOUNDARY_ARN=$(aws iam create-policy \
-        --policy-name git-provisioning-boundary \
+        --policy-name $perm1_name \
         --policy-document file://perm1.json \
+        --tags Key=product_name,Value="$PRODUCT_NAME" Key=product_id,Value="$PRODUCT_ID" \
         --query 'Policy.Arn' \
         --output text)
     
@@ -118,6 +126,7 @@ if [ -f "perm1.json" ]; then
         --role-name git-provisioning-agent-role \
         --assume-role-policy-document file://trust-policy.json \
         --permissions-boundary $PERM_BOUNDARY_ARN \
+        --tags Key=product_name,Value="$PRODUCT_NAME" Key=product_id,Value="$PRODUCT_ID" \
         --query 'Role.Arn' \
         --output text)
     
@@ -128,6 +137,7 @@ else
     ROLE_ARN=$(aws iam create-role \
         --role-name git-provisioning-agent-role \
         --assume-role-policy-document file://trust-policy.json \
+        --tags Key=product_name,Value="$PRODUCT_NAME" Key=product_id,Value="$PRODUCT_ID" \
         --query 'Role.Arn' \
         --output text)
 fi
@@ -147,6 +157,7 @@ create_and_attach_policy() {
         local policy_arn=$(aws iam create-policy \
             --policy-name $policy_name \
             --policy-document file://$policy_file \
+            --tags Key=product_name,Value="$PRODUCT_NAME" Key=product_id,Value="$PRODUCT_ID" \
             --query 'Policy.Arn' \
             --output text)
         
@@ -167,9 +178,12 @@ create_and_attach_policy "policyd.json" "git-provisioning-agent-role"
 # Create perm2.json permissions boundary without attaching it to any role
 if [ -f "perm2.json" ]; then
     echo "Creating permissions boundary from perm2.json (not attached to any role)..."
+    # Use the filename without extension as the policy name
+    local perm2_name=$(basename "perm2.json" .json)
     PERM2_BOUNDARY_ARN=$(aws iam create-policy \
-        --policy-name standalone-permissions-boundary \
+        --policy-name $perm2_name \
         --policy-document file://perm2.json \
+        --tags Key=product_name,Value="$PRODUCT_NAME" Key=product_id,Value="$PRODUCT_ID" \
         --query 'Policy.Arn' \
         --output text)
     
@@ -180,7 +194,7 @@ fi
 
 echo "Setup complete!"
 echo "GitHub OIDC provider and git-provisioning-agent-role have been created."
-echo "The role is configured to be assumed by the repository: quixoticmonk/terraform-aws-glue"
+echo "The role is configured to be assumed by the repository: $GITHUB_REPO"
 
 # Clean up temporary files
 rm -f trust-policy.json
