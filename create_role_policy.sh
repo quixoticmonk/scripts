@@ -2,7 +2,7 @@
 
 # Script to set up GitHub OIDC provider and create a role for GitHub Actions
 # This script sets up an Identity provider for GitHub on the target AWS account
-# and creates a role called "github-role" that allows the 
+# and creates a role called "git-provisioning-agent-role" that allows the 
 # repository "quixoticmonk/terraform-aws-glue" to assume it
 
 # Display usage information if no arguments provided
@@ -10,12 +10,14 @@ if [ "$#" -gt 0 ] && [ "$1" == "--help" ]; then
     echo "Usage: $0"
     echo ""
     echo "This script sets up a GitHub OIDC provider in AWS and creates a role"
-    echo "called 'github-role' that can be assumed by the"
+    echo "called 'git-provisioning-agent-role' that can be assumed by the"
     echo "'quixoticmonk/terraform-aws-glue' GitHub repository."
     echo ""
     echo "Required files:"
-    echo "  - policy.json: IAM policy to attach to the role"
-    echo "  - policy2.json: Additional IAM policy to attach to the role"
+    echo "  - policya.json: IAM policy to attach to the role"
+    echo "  - policyb.json: Additional IAM policy to attach to the role"
+    echo "  - policyc.json: Additional IAM policy to attach to the role"
+    echo "  - policyd.json: Additional IAM policy to attach to the role"
     echo "  - perm1.json: Permissions boundary to attach to the role"
     echo "  - perm2.json: Standalone permissions boundary (not attached to any role)"
     echo ""
@@ -51,8 +53,10 @@ replace_placeholders() {
 }
 
 # Replace placeholders in all policy files
-replace_placeholders "policy.json"
-replace_placeholders "policy2.json"
+replace_placeholders "policya.json"
+replace_placeholders "policyb.json"
+replace_placeholders "policyc.json"
+replace_placeholders "policyd.json"
 replace_placeholders "perm1.json"
 replace_placeholders "perm2.json"
 
@@ -98,7 +102,7 @@ cat > trust-policy.json << EOF
 }
 EOF
 
-echo "Creating role github-role..."
+echo "Creating role git-provisioning-agent-role..."
 
 # Check if perm1.json exists to use as permissions boundary
 if [ -f "perm1.json" ]; then
@@ -111,7 +115,7 @@ if [ -f "perm1.json" ]; then
     
     # Create the role with the trust policy and permissions boundary
     ROLE_ARN=$(aws iam create-role \
-        --role-name github-role \
+        --role-name git-provisioning-agent-role \
         --assume-role-policy-document file://trust-policy.json \
         --permissions-boundary $PERM_BOUNDARY_ARN \
         --query 'Role.Arn' \
@@ -122,7 +126,7 @@ else
     echo "Warning: perm1.json not found. Creating role without permissions boundary."
     # Create the role with the trust policy
     ROLE_ARN=$(aws iam create-role \
-        --role-name github-role \
+        --role-name git-provisioning-agent-role \
         --assume-role-policy-document file://trust-policy.json \
         --query 'Role.Arn' \
         --output text)
@@ -130,36 +134,35 @@ fi
 
 echo "Created role with ARN: $ROLE_ARN"
 
-# Check if policy files exist and attach them
-if [ -f "policy.json" ]; then
-    echo "Attaching policy from policy.json..."
-    POLICY_ARN=$(aws iam create-policy \
-        --policy-name git-provisioning-policy-1 \
-        --policy-document file://policy.json \
-        --query 'Policy.Arn' \
-        --output text)
+# Function to create and attach a policy
+create_and_attach_policy() {
+    local policy_file=$1
+    local role_name=$2
     
-    aws iam attach-role-policy \
-        --role-name github-role \
-        --policy-arn $POLICY_ARN
-    
-    echo "Attached policy: $POLICY_ARN"
-fi
+    if [ -f "$policy_file" ]; then
+        # Extract policy name from filename (remove .json extension)
+        local policy_name=$(basename "$policy_file" .json)
+        
+        echo "Attaching policy from $policy_file..."
+        local policy_arn=$(aws iam create-policy \
+            --policy-name $policy_name \
+            --policy-document file://$policy_file \
+            --query 'Policy.Arn' \
+            --output text)
+        
+        aws iam attach-role-policy \
+            --role-name $role_name \
+            --policy-arn $policy_arn
+        
+        echo "Attached policy: $policy_arn"
+    fi
+}
 
-if [ -f "policy2.json" ]; then
-    echo "Attaching policy from policy2.json..."
-    POLICY_ARN2=$(aws iam create-policy \
-        --policy-name git-provisioning-policy-2 \
-        --policy-document file://policy2.json \
-        --query 'Policy.Arn' \
-        --output text)
-    
-    aws iam attach-role-policy \
-        --role-name github-role \
-        --policy-arn $POLICY_ARN2
-    
-    echo "Attached policy: $POLICY_ARN2"
-fi
+# Create and attach policies
+create_and_attach_policy "policya.json" "git-provisioning-agent-role"
+create_and_attach_policy "policyb.json" "git-provisioning-agent-role"
+create_and_attach_policy "policyc.json" "git-provisioning-agent-role"
+create_and_attach_policy "policyd.json" "git-provisioning-agent-role"
 
 # Create perm2.json permissions boundary without attaching it to any role
 if [ -f "perm2.json" ]; then
@@ -176,10 +179,10 @@ else
 fi
 
 echo "Setup complete!"
-echo "GitHub OIDC provider and github-role have been created."
+echo "GitHub OIDC provider and git-provisioning-agent-role have been created."
 echo "The role is configured to be assumed by the repository: quixoticmonk/terraform-aws-glue"
 
 # Clean up temporary files
 rm -f trust-policy.json
 
-echo "Note: Make sure to create policy.json, policy2.json, perm1.json, and perm2.json with the required permissions before running this script."
+echo "Note: Make sure to create policya.json, policyb.json, policyc.json, policyd.json, perm1.json, and perm2.json with the required permissions before running this script."
