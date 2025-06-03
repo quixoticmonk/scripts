@@ -117,7 +117,7 @@ if [ -f "perm1.json" ]; then
     PERM_BOUNDARY_ARN=$(aws iam create-policy \
         --policy-name $perm1_name \
         --policy-document file://perm1.json \
-        --tags Key=product_name,Value="$PRODUCT_NAME" Key=product_id,Value="$PRODUCT_ID" \
+        --tags Key=product_name,Value="$PRODUCT_NAME" Key=product_id,Value="$PRODUCT_ID" Key=ProductName,Value="$PRODUCT_NAME" Key=ProductId,Value="$PRODUCT_ID" \
         --query 'Policy.Arn' \
         --output text)
     
@@ -126,7 +126,7 @@ if [ -f "perm1.json" ]; then
         --role-name git-provisioning-agent-role \
         --assume-role-policy-document file://trust-policy.json \
         --permissions-boundary $PERM_BOUNDARY_ARN \
-        --tags Key=product_name,Value="$PRODUCT_NAME" Key=product_id,Value="$PRODUCT_ID" \
+        --tags Key=product_name,Value="$PRODUCT_NAME" Key=product_id,Value="$PRODUCT_ID" Key=ProductName,Value="$PRODUCT_NAME" Key=ProductId,Value="$PRODUCT_ID" \
         --query 'Role.Arn' \
         --output text)
     
@@ -137,7 +137,7 @@ else
     ROLE_ARN=$(aws iam create-role \
         --role-name git-provisioning-agent-role \
         --assume-role-policy-document file://trust-policy.json \
-        --tags Key=product_name,Value="$PRODUCT_NAME" Key=product_id,Value="$PRODUCT_ID" \
+        --tags Key=product_name,Value="$PRODUCT_NAME" Key=product_id,Value="$PRODUCT_ID" Key=ProductName,Value="$PRODUCT_NAME" Key=ProductId,Value="$PRODUCT_ID" \
         --query 'Role.Arn' \
         --output text)
 fi
@@ -157,7 +157,7 @@ create_and_attach_policy() {
         local policy_arn=$(aws iam create-policy \
             --policy-name $policy_name \
             --policy-document file://$policy_file \
-            --tags Key=product_name,Value="$PRODUCT_NAME" Key=product_id,Value="$PRODUCT_ID" \
+            --tags Key=product_name,Value="$PRODUCT_NAME" Key=product_id,Value="$PRODUCT_ID" Key=ProductName,Value="$PRODUCT_NAME" Key=ProductId,Value="$PRODUCT_ID" \
             --query 'Policy.Arn' \
             --output text)
         
@@ -183,7 +183,7 @@ if [ -f "perm2.json" ]; then
     PERM2_BOUNDARY_ARN=$(aws iam create-policy \
         --policy-name $perm2_name \
         --policy-document file://perm2.json \
-        --tags Key=product_name,Value="$PRODUCT_NAME" Key=product_id,Value="$PRODUCT_ID" \
+        --tags Key=product_name,Value="$PRODUCT_NAME" Key=product_id,Value="$PRODUCT_ID" Key=ProductName,Value="$PRODUCT_NAME" Key=ProductId,Value="$PRODUCT_ID" \
         --query 'Policy.Arn' \
         --output text)
     
@@ -200,3 +200,6 @@ echo "The role is configured to be assumed by the repository: $GITHUB_REPO"
 rm -f trust-policy.json
 
 echo "Note: Make sure to create policya.json, policyb.json, policyc.json, policyd.json, perm1.json, and perm2.json with the required permissions before running this script."
+
+# Output the ARN of the role as the last step
+echo "Role ARN: $ROLE_ARN"
