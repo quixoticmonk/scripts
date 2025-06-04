@@ -10,7 +10,7 @@ if [ "$#" -gt 0 ] && [ "$1" == "--help" ]; then
     echo "Usage: $0"
     echo ""
     echo "This script sets up a GitHub OIDC provider in AWS and creates a role"
-    echo "called 'git-provisioning-agent-role' that can be assumed by the"
+    echo "called 'role-PRODUCT_NAME-PRODUCT_ID-glue-git-provisioningagent' that can be assumed by the"
     echo "GitHub repository you specify."
     echo ""
     echo "Required files:"
@@ -44,26 +44,28 @@ read -p "Enter GitHub Repository (e.g., username/repo): " GITHUB_REPO
 REGION=${REGION:-"us-east-1"}
 echo "Using AWS Region: $REGION"
 
-# Function to replace placeholders in JSON files
-replace_placeholders() {
+# Function to create temporary JSON files with placeholders replaced
+create_temp_json() {
     local file=$1
+    local temp_file="temp_${file}"
     if [ -f "$file" ]; then
-        echo "Replacing placeholders in $file..."
-        sed -i.bak "s/ACCOUNT_ID/$ACCOUNT_ID/g" "$file"
-        sed -i.bak "s/PRODUCT_ID/$PRODUCT_ID/g" "$file"
-        sed -i.bak "s/PRODUCT_NAME/$PRODUCT_NAME/g" "$file"
-        sed -i.bak "s/REGION/$REGION/g" "$file"
-        rm -f "${file}.bak"
+        echo "Creating temporary file with replaced placeholders: $temp_file"
+        cp "$file" "$temp_file"
+        sed -i.bak "s/ACCOUNT_ID/$ACCOUNT_ID/g" "$temp_file"
+        sed -i.bak "s/PRODUCT_ID/$PRODUCT_ID/g" "$temp_file"
+        sed -i.bak "s/PRODUCT_NAME/$PRODUCT_NAME/g" "$temp_file"
+        sed -i.bak "s/REGION/$REGION/g" "$temp_file"
+        rm -f "${temp_file}.bak"
     fi
 }
 
-# Replace placeholders in all policy files
-replace_placeholders "policya.json"
-replace_placeholders "policyb.json"
-replace_placeholders "policyc.json"
-replace_placeholders "policyd.json"
-replace_placeholders "perm1.json"
-replace_placeholders "perm2.json"
+# Create temporary JSON files with placeholders replaced
+create_temp_json "policya.json"
+create_temp_json "policyb.json"
+create_temp_json "policyc.json"
+create_temp_json "policyd.json"
+create_temp_json "perm1.json"
+create_temp_json "perm2.json"
 
 # Check if AWS CLI is installed
 if ! command -v aws &> /dev/null; then
@@ -107,25 +109,25 @@ cat > trust-policy.json << EOF
 }
 EOF
 
-echo "Creating role git-provisioning-agent-role..."
+echo "Creating role role-${PRODUCT_NAME}-${PRODUCT_ID}-glue-git-provisioningagent..."
 
-# Check if perm1.json exists to use as permissions boundary
-if [ -f "perm1.json" ]; then
-    echo "Using perm1.json as permissions boundary for the role..."
+# Check if temp_perm1.json exists to use as permissions boundary
+if [ -f "temp_perm1.json" ]; then
+    echo "Using temp_perm1.json as permissions boundary for the role..."
     # Use the filename without extension as the policy name
     local perm1_name=$(basename "perm1.json" .json)
     PERM_BOUNDARY_ARN=$(aws iam create-policy \
-        --policy-name $perm1_name \
-        --policy-document file://perm1.json \
+        --policy-name "$perm1_name" \
+        --policy-document file://temp_perm1.json \
         --tags Key=product_name,Value="$PRODUCT_NAME" Key=product_id,Value="$PRODUCT_ID" Key=ProductName,Value="$PRODUCT_NAME" Key=ProductId,Value="$PRODUCT_ID" \
         --query 'Policy.Arn' \
         --output text)
     
     # Create the role with the trust policy and permissions boundary
     ROLE_ARN=$(aws iam create-role \
-        --role-name git-provisioning-agent-role \
+        --role-name role-${PRODUCT_NAME}-${PRODUCT_ID}-glue-git-provisioningagent \
         --assume-role-policy-document file://trust-policy.json \
-        --permissions-boundary $PERM_BOUNDARY_ARN \
+        --permissions-boundary "$PERM_BOUNDARY_ARN" \
         --tags Key=product_name,Value="$PRODUCT_NAME" Key=product_id,Value="$PRODUCT_ID" Key=ProductName,Value="$PRODUCT_NAME" Key=ProductId,Value="$PRODUCT_ID" \
         --query 'Role.Arn' \
         --output text)
@@ -135,7 +137,7 @@ else
     echo "Warning: perm1.json not found. Creating role without permissions boundary."
     # Create the role with the trust policy
     ROLE_ARN=$(aws iam create-role \
-        --role-name git-provisioning-agent-role \
+        --role-name role-${PRODUCT_NAME}-${PRODUCT_ID}-glue-git-provisioningagent \
         --assume-role-policy-document file://trust-policy.json \
         --tags Key=product_name,Value="$PRODUCT_NAME" Key=product_id,Value="$PRODUCT_ID" Key=ProductName,Value="$PRODUCT_NAME" Key=ProductId,Value="$PRODUCT_ID" \
         --query 'Role.Arn' \
@@ -148,41 +150,42 @@ echo "Created role with ARN: $ROLE_ARN"
 create_and_attach_policy() {
     local policy_file=$1
     local role_name=$2
+    local temp_policy_file="temp_$policy_file"
     
-    if [ -f "$policy_file" ]; then
+    if [ -f "$temp_policy_file" ]; then
         # Extract policy name from filename (remove .json extension)
         local policy_name=$(basename "$policy_file" .json)
         
-        echo "Attaching policy from $policy_file..."
+        echo "Attaching policy from $temp_policy_file..."
         local policy_arn=$(aws iam create-policy \
-            --policy-name $policy_name \
-            --policy-document file://$policy_file \
+            --policy-name "$policy_name" \
+            --policy-document "file://$temp_policy_file" \
             --tags Key=product_name,Value="$PRODUCT_NAME" Key=product_id,Value="$PRODUCT_ID" Key=ProductName,Value="$PRODUCT_NAME" Key=ProductId,Value="$PRODUCT_ID" \
             --query 'Policy.Arn' \
             --output text)
         
         aws iam attach-role-policy \
-            --role-name $role_name \
-            --policy-arn $policy_arn
+            --role-name "$role_name" \
+            --policy-arn "$policy_arn"
         
         echo "Attached policy: $policy_arn"
     fi
 }
 
 # Create and attach policies
-create_and_attach_policy "policya.json" "git-provisioning-agent-role"
-create_and_attach_policy "policyb.json" "git-provisioning-agent-role"
-create_and_attach_policy "policyc.json" "git-provisioning-agent-role"
-create_and_attach_policy "policyd.json" "git-provisioning-agent-role"
+create_and_attach_policy "policya.json" "role-${PRODUCT_NAME}-${PRODUCT_ID}-glue-git-provisioningagent"
+create_and_attach_policy "policyb.json" "role-${PRODUCT_NAME}-${PRODUCT_ID}-glue-git-provisioningagent"
+create_and_attach_policy "policyc.json" "role-${PRODUCT_NAME}-${PRODUCT_ID}-glue-git-provisioningagent"
+create_and_attach_policy "policyd.json" "role-${PRODUCT_NAME}-${PRODUCT_ID}-glue-git-provisioningagent"
 
-# Create perm2.json permissions boundary without attaching it to any role
-if [ -f "perm2.json" ]; then
-    echo "Creating permissions boundary from perm2.json (not attached to any role)..."
+# Create temp_perm2.json permissions boundary without attaching it to any role
+if [ -f "temp_perm2.json" ]; then
+    echo "Creating permissions boundary from temp_perm2.json (not attached to any role)..."
     # Use the filename without extension as the policy name
     local perm2_name=$(basename "perm2.json" .json)
     PERM2_BOUNDARY_ARN=$(aws iam create-policy \
-        --policy-name $perm2_name \
-        --policy-document file://perm2.json \
+        --policy-name "$perm2_name" \
+        --policy-document file://temp_perm2.json \
         --tags Key=product_name,Value="$PRODUCT_NAME" Key=product_id,Value="$PRODUCT_ID" Key=ProductName,Value="$PRODUCT_NAME" Key=ProductId,Value="$PRODUCT_ID" \
         --query 'Policy.Arn' \
         --output text)
@@ -193,13 +196,16 @@ else
 fi
 
 echo "Setup complete!"
-echo "GitHub OIDC provider and git-provisioning-agent-role have been created."
+echo "GitHub OIDC provider and role-${PRODUCT_NAME}-${PRODUCT_ID}-glue-git-provisioningagent have been created."
 echo "The role is configured to be assumed by the repository: $GITHUB_REPO"
 
 # Clean up temporary files
 rm -f trust-policy.json
+rm -f temp_*.json
 
 echo "Note: Make sure to create policya.json, policyb.json, policyc.json, policyd.json, perm1.json, and perm2.json with the required permissions before running this script."
 
 # Output the ARN of the role as the last step
+echo "********************"
 echo "Role ARN: $ROLE_ARN"
+echo "********************"
