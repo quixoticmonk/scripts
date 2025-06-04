@@ -182,7 +182,7 @@ create_and_attach_policy "policyd.json" "role-${PRODUCT_NAME}-${PRODUCT_ID}-glue
 if [ -f "temp_perm2.json" ]; then
     echo "Creating permissions boundary from temp_perm2.json (not attached to any role)..."
     # Use the filename without extension as the policy name
-    local perm2_name=$(basename "perm2.json" .json)
+    perm2_name=$(basename "perm2.json" .json)
     PERM2_BOUNDARY_ARN=$(aws iam create-policy \
         --policy-name "$perm2_name" \
         --policy-document file://temp_perm2.json \
@@ -194,6 +194,30 @@ if [ -f "temp_perm2.json" ]; then
 else
     echo "Warning: perm2.json not found. Skipping creation of standalone permissions boundary."
 fi
+
+# Create admin policy without attaching it to any role
+echo "Creating admin policy with administrator access..."
+cat > temp_admin.json << EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": "*",
+      "Resource": "*"
+    }
+  ]
+}
+EOF
+
+ADMIN_POLICY_ARN=$(aws iam create-policy \
+    --policy-name "admin-${PRODUCT_NAME}-${PRODUCT_ID}" \
+    --policy-document file://temp_admin.json \
+    --tags Key=product_name,Value="$PRODUCT_NAME" Key=product_id,Value="$PRODUCT_ID" Key=ProductName,Value="$PRODUCT_NAME" Key=ProductId,Value="$PRODUCT_ID" \
+    --query 'Policy.Arn' \
+    --output text)
+
+echo "Created standalone admin policy: $ADMIN_POLICY_ARN"
 
 echo "Setup complete!"
 echo "GitHub OIDC provider and role-${PRODUCT_NAME}-${PRODUCT_ID}-glue-git-provisioningagent have been created."
