@@ -23,36 +23,41 @@ This document outlines strategies for managing a Python library that supports bo
 ### Branch Structure
 
 ```
-main (Python 3.11+)
-├── python37 (Python 3.7 compatible)
-├── feature/new-py311-feature
-└── hotfix/py37-critical-fix
+main (Python 3.7 compatible - stable)
+├── release/5.0 (Python 3.11+ features)
+├── feature/new-py37-feature
+└── hotfix/critical-fix
 ```
 
 ### Versioning Scheme
 
-- **Python 3.11+**: `v2.x.x` (Major version 2)
-- **Python 3.7**: `v1.x.x` (Major version 1)
+- **Python 3.7**: `v1.x.x` (Main branch - stable)
+- **Python 3.11+**: `v2.x.x` (Release/5.0 branch - Glue 5.0 features)
 
 ### Branch Management Workflow
 
-1. **Main Development**: All new features go to `main` branch (Python 3.11+)
-2. **Backporting**: Critical fixes and compatible features backported to `python37` branch
-3. **Release Process**: 
-   - Tag releases from respective branches
+1. **Main Development**: All stable features and Python 3.7 compatibility maintained in `main` branch
+2. **Modern Features**: Python 3.11+ specific features developed in `release/5.0` branch
+3. **Feature Development**: 
+   - Python 3.7 compatible features: branch from `main`
+   - Python 3.11+ features: branch from `release/5.0`
+4. **Release Process**: 
+   - Tag releases from `main` for v1.x.x (Python 3.7)
+   - Tag releases from `release/5.0` for v2.x.x (Python 3.11+ / Glue 5.0)
    - Maintain separate CHANGELOG files for each version
 
 ### Pros and Cons
 
 **Pros:**
-- Clear separation of concerns
-- Independent development cycles
-- Easy to maintain different feature sets
+- Stable main branch for production use
+- Clear separation between stable and experimental features
+- Python 3.7 remains the primary supported version
+- Easy rollback to stable versions
 
 **Cons:**
-- Potential code duplication
-- More complex merge processes
-- Higher maintenance overhead
+- Modern features require branch switching
+- Potential merge conflicts between branches
+- Need to maintain feature parity documentation
 
 ---
 
@@ -117,55 +122,53 @@ setup(
 )
 ```
 
-### Using pyproject.toml (Modern Approach)
+### Alternative: requirements.txt Approach
 
-```toml
-[build-system]
-requires = ["setuptools>=45", "wheel", "setuptools_scm[toml]>=6.2"]
-build-backend = "setuptools.build_meta"
+For simpler dependency management, you can use separate requirements files:
 
-[project]
-name = "aws-glue-datasource-lib"
-description = "Python library for AWS Glue external datasource support"
-readme = "README.md"
-requires-python = ">=3.7"
-license = {text = "MIT"}
-authors = [
-    {name = "Your Team", email = "team@company.com"},
-]
-classifiers = [
-    "Development Status :: 4 - Beta",
-    "Programming Language :: Python :: 3.7",
-    "Programming Language :: Python :: 3.11",
-]
-dynamic = ["version"]
+```
+# requirements/base.txt
+boto3>=1.20.0,<2.0.0
+botocore>=1.23.0,<2.0.0
+requests>=2.25.0
 
-dependencies = [
-    "boto3>=1.20.0,<2.0.0",
-    "botocore>=1.23.0,<2.0.0",
-    "requests>=2.25.0",
-    # Conditional dependencies
-    "pandas>=1.3.0,<2.0.0; python_version<'3.11'",
-    "pandas>=2.0.0; python_version>='3.11'",
-    "numpy>=1.19.0,<1.22.0; python_version<'3.11'",
-    "numpy>=1.24.0; python_version>='3.11'",
-    "typing-extensions>=3.10.0; python_version<'3.11'",
-]
+# requirements/py37.txt
+-r base.txt
+pandas>=1.3.0,<2.0.0
+numpy>=1.19.0,<1.22.0
+typing-extensions>=3.10.0
 
-[project.optional-dependencies]
-dev = [
-    "pytest>=6.0.0",
-    "black>=22.0.0",
-    "mypy>=0.950",
-    "pre-commit>=2.15.0",
-]
-py311-extras = [
-    "polars>=0.18.0; python_version>='3.11'",
-    "advanced-feature-lib>=1.0.0; python_version>='3.11'",
-]
+# requirements/py311.txt  
+-r base.txt
+pandas>=2.0.0
+numpy>=1.24.0
+polars>=0.18.0
+```
 
-[tool.setuptools_scm]
-write_to = "src/glue_lib/_version.py"
+Then in your setup.py:
+
+```python
+import sys
+from setuptools import setup, find_packages
+
+def read_requirements(filename):
+    with open(filename, 'r') as f:
+        return [line.strip() for line in f if line.strip() and not line.startswith('#') and not line.startswith('-r')]
+
+# Determine requirements file based on Python version
+if sys.version_info >= (3, 11):
+    requirements_file = 'requirements/py311.txt'
+elif sys.version_info >= (3, 7):
+    requirements_file = 'requirements/py37.txt'
+else:
+    raise RuntimeError("Python 3.7+ is required")
+
+setup(
+    name="aws-glue-datasource-lib",
+    python_requires=">=3.7,<4.0",
+    install_requires=read_requirements(requirements_file),
+    # ... rest of setup configuration
+)
 ```
 
 ---
@@ -275,9 +278,9 @@ name: Test Suite
 
 on:
   push:
-    branches: [ main, python37 ]
+    branches: [ main, release/5.0 ]
   pull_request:
-    branches: [ main, python37 ]
+    branches: [ main, release/5.0 ]
 
 jobs:
   test:
@@ -289,10 +292,10 @@ jobs:
         include:
           - python-version: "3.7.16"
             toxenv: py37
-            branch-constraint: python37
+            branch-constraint: main
           - python-version: "3.11"
             toxenv: py311
-            branch-constraint: main
+            branch-constraint: release/5.0
 
     steps:
     - name: Checkout code
@@ -307,7 +310,7 @@ jobs:
       uses: actions/cache@v3
       with:
         path: ~/.cache/pip
-        key: ${{ runner.os }}-pip-${{ matrix.python-version }}-${{ hashFiles('**/requirements*.txt', 'setup.py', 'pyproject.toml') }}
+        key: ${{ runner.os }}-pip-${{ matrix.python-version }}-${{ hashFiles('**/requirements*.txt', 'setup.py') }}
         
     - name: Install dependencies
       run: |
@@ -354,7 +357,7 @@ jobs:
         if [[ ${{ github.ref }} == refs/tags/v1.* ]]; then
           echo "python_version=3.7.16" >> $GITHUB_OUTPUT
           echo "package_suffix=-py37" >> $GITHUB_OUTPUT
-        else
+        elif [[ ${{ github.ref }} == refs/tags/v2.* ]]; then
           echo "python_version=3.11" >> $GITHUB_OUTPUT
           echo "package_suffix=" >> $GITHUB_OUTPUT
         fi
@@ -431,8 +434,8 @@ commands =
 ### Strategy 1: Dual Package Distribution
 
 **Separate Packages:**
-- `aws-glue-datasource-lib` (Python 3.11+)
-- `aws-glue-datasource-lib-py37` (Python 3.7)
+- `aws-glue-datasource-lib` (Python 3.7 - main package)
+- `aws-glue-datasource-lib-modern` (Python 3.11+)
 
 **Pros:**
 - Clear separation for users
@@ -450,15 +453,15 @@ commands =
 
 **Version Strategy:**
 ```
-v1.x.x - Python 3.7 compatible (maintenance mode)
-v2.x.x - Python 3.11+ with new features
+v1.x.x - Python 3.7 compatible (main branch - stable)
+v2.x.x - Python 3.11+ with Glue 5.0 features (release/5.0 branch)
 ```
 
 **Release Process:**
-1. Develop new features in `main` branch (Python 3.11+)
-2. Backport critical fixes to `python37` branch
-3. Release v2.x.x from `main`
-4. Release v1.x.x from `python37` (as needed)
+1. Develop stable features in `main` branch (Python 3.7 compatible)
+2. Develop Glue 5.0 features in `release/5.0` branch (Python 3.11+)
+3. Release v1.x.x from `main` (stable releases)
+4. Release v2.x.x from `release/5.0` (Glue 5.0 features)
 
 ### Semantic Versioning Guidelines
 
@@ -471,11 +474,11 @@ PATCH: Bug fixes and small improvements
 ```
 
 **Examples:**
-- `v1.0.0` - Initial Python 3.7 release
+- `v1.0.0` - Stable Python 3.7 release (main branch)
 - `v1.1.0` - New feature for Python 3.7
 - `v1.1.1` - Bug fix for Python 3.7
-- `v2.0.0` - Python 3.11+ with breaking changes
-- `v2.1.0` - New Python 3.11+ features
+- `v2.0.0` - Python 3.11+ with Glue 5.0 features
+- `v2.1.0` - New Python 3.11+ / Glue 5.0 features
 
 ---
 
@@ -505,11 +508,11 @@ aws-glue-datasource-lib/
 │       │   ├── s3.py
 │       │   ├── rds.py
 │       │   └── custom.py
-│       ├── modern_features/     # Python 3.11+ specific
+│       ├── modern_features/     # Python 3.11+ specific (release/5.0)
 │       │   ├── __init__.py
 │       │   ├── advanced_processor.py
 │       │   └── pattern_matching.py
-│       └── legacy_features/     # Python 3.7 compatible
+│       └── legacy_features/     # Python 3.7 compatible (main)
 │           ├── __init__.py
 │           ├── basic_processor.py
 │           └── compatibility.py
@@ -534,8 +537,7 @@ aws-glue-datasource-lib/
 │   ├── py37.txt
 │   ├── py311.txt
 │   └── dev.txt
-├── pyproject.toml
-├── setup.py                     # Fallback for older pip versions
+├── setup.py
 ├── tox.ini
 ├── README.md
 ├── CHANGELOG.md
@@ -552,65 +554,68 @@ aws-glue-datasource-lib/
 ```markdown
 # Installation Guide
 
-## Python 3.11+ (Recommended)
-
-```bash
-pip install aws-glue-datasource-lib>=2.0.0
-```
-
-## Python 3.7 (Legacy Support)
+## Python 3.7 (Stable - Recommended for Production)
 
 ```bash
 pip install "aws-glue-datasource-lib>=1.0.0,<2.0.0"
 ```
 
+## Python 3.11+ (Glue 5.0 Features)
+
+```bash
+pip install aws-glue-datasource-lib>=2.0.0
+```
+
 ## Version Compatibility Matrix
 
-| Python Version | Library Version | Features |
-|----------------|-----------------|----------|
-| 3.7.16         | 1.x.x          | Core functionality, basic data processing |
-| 3.11+          | 2.x.x          | All features, advanced processing, pattern matching |
+| Python Version | Library Version | Features | Branch | AWS Glue |
+|----------------|-----------------|----------|---------|----------|
+| 3.7.16         | 1.x.x          | Core functionality, stable features | main | Glue 2.0 |
+| 3.11+          | 2.x.x          | All features, Glue 5.0 processing, pattern matching | release/5.0 | Glue 5.0 |
 ```
 
 ### Migration Guide
 
 ```markdown
-# Migration Guide: Python 3.7 to 3.11
+# Migration Guide: Python 3.7 to 3.11 (Glue 2.0 to Glue 5.0)
 
 ## Overview
-This guide helps you migrate from the Python 3.7 compatible version (v1.x.x) to the Python 3.11+ version (v2.x.x).
+This guide helps you migrate from the Python 3.7 stable version (v1.x.x) to the Python 3.11+ Glue 5.0 version (v2.x.x).
 
 ## Breaking Changes
 
 ### 1. Import Changes
 ```python
-# Old (v1.x.x)
+# Old (v1.x.x - Python 3.7 / Glue 2.0)
 from glue_lib.legacy_features import BasicProcessor
 
-# New (v2.x.x)
+# New (v2.x.x - Python 3.11+ / Glue 5.0)
 from glue_lib.modern_features import AdvancedProcessor
 ```
 
 ### 2. Configuration Changes
 ```python
-# Old configuration
+# Old configuration (v1.x.x)
 config = {
     "processor_type": "basic",
-    "compatibility_mode": True
+    "compatibility_mode": True,
+    "glue_version": "2.0"
 }
 
-# New configuration
+# New configuration (v2.x.x)
 config = {
     "processor_type": "advanced",
-    "use_pattern_matching": True
+    "use_pattern_matching": True,
+    "glue_version": "5.0"
 }
 ```
 
-## New Features in v2.x.x
+## New Features in v2.x.x (Glue 5.0)
 - Pattern matching for data processing
 - Enhanced type hints
 - Improved error messages
 - Better performance with modern libraries
+- Glue 5.0 specific optimizations
 ```
 
 ---
@@ -623,6 +628,7 @@ AWS Glue has specific Python runtime versions:
 - **Glue 2.0**: Python 3.7
 - **Glue 3.0**: Python 3.9
 - **Glue 4.0**: Python 3.10
+- **Glue 5.0**: Python 3.11+
 
 ### Deployment Strategy
 
@@ -655,7 +661,7 @@ def deploy_glue_job(job_name: str, python_version: str, script_location: str) ->
             '--enable-metrics': '',
             '--enable-continuous-cloudwatch-log': 'true'
         },
-        'GlueVersion': '4.0' if python_version != '3.7' else '2.0'
+        'GlueVersion': '5.0' if python_version != '3.7' else '2.0'
     }
     
     response = glue_client.create_job(**job_config)
@@ -687,9 +693,9 @@ def test_glue_integration_py37():
 
 @mock_glue  
 def test_glue_integration_py311():
-    """Test integration with Glue 4.0 (Python 3.10+)."""
+    """Test integration with Glue 5.0 (Python 3.11+)."""
     config = {
-        "glue_version": "4.0", 
+        "glue_version": "5.0", 
         "python_version": "3.11",
         "use_advanced_features": True
     }
@@ -867,10 +873,15 @@ class TestCompatibility:
 
 This comprehensive strategy provides multiple approaches for managing a Python library across different versions while maintaining compatibility with AWS Glue's runtime constraints. The recommended approach combines:
 
-1. **Single package with conditional dependencies** for easier maintenance
-2. **Feature detection patterns** for runtime compatibility
-3. **Comprehensive CI/CD testing** across all supported versions
-4. **Clear documentation and migration guides** for users
-5. **Semantic versioning** that reflects Python version compatibility
+1. **Main branch for Python 3.7 stability** with `release/5.0` for modern features
+2. **Single package with conditional dependencies** for easier maintenance
+3. **Feature detection patterns** for runtime compatibility
+4. **Comprehensive CI/CD testing** across all supported versions
+5. **Clear documentation and migration guides** for users
+6. **Semantic versioning** that reflects Python version compatibility (v1.x.x for Python 3.7, v2.x.x for Python 3.11+)
+
+This approach prioritizes stability in the main branch while allowing innovation in the release/5.0 branch. Teams can choose the version that best fits their runtime requirements:
+- **v1.x.x**: Stable, production-ready features for Python 3.7 (AWS Glue 2.0)
+- **v2.x.x**: Modern features and Glue 5.0 optimizations for Python 3.11+ (AWS Glue 5.0)
 
 Choose the specific strategies that best fit your team's workflow and maintenance capacity. Start with the conditional dependencies approach and feature detection patterns, as they provide the best balance of functionality and maintainability.
